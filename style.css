@@ -12,5 +12,17 @@ label {font-size:13px}
 .btn[aria-busy="true"] {cursor:progress}
 #otp-timer:not(:empty){font-weight:600;color:#105d77}
 .two > *, .three > *, .otp-row > *, .body-grid > * {min-width:0}
+.environment-badge{display:inline-flex;align-items:center;justify-content:center;background:#f59e0b;color:#3c2600;border:2px solid #8a5200;border-radius:999px;padding:4px 11px;font-size:11px;font-weight:800;letter-spacing:.12em;box-shadow:0 2px 8px #7a4a0022}
+.top{position:relative}
+.student-education{margin-top:15px}
+.otp-instructions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#eef8fa;border:1px solid #c7e4e9;border-radius:13px;padding:12px 14px;margin:0 0 14px;color:#244e62}
+.otp-instructions strong{margin-right:4px}
+.otp-instructions span{display:flex;align-items:center;gap:6px;font-size:12px}
+.otp-instructions b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#0d7188;color:#fff;font-size:11px}
+.locked-setting{background:#fff8e8;border:1px solid #e7c978;border-radius:13px;padding:10px 14px;margin:13px 0}
+.locked-setting .check{font-weight:600;margin:0}
+.locked-setting .hint{margin:5px 0 0 26px;color:#654d18}
+input:disabled,select:disabled{background:#eef3f5;color:#607381}
 @media(max-width:590px){.hero{padding:18px 18px 20px}.hero h1{font-size:24px;margin:5px 0}.hero p{font-size:12px}.features{margin-top:11px}.features span{font-size:11px}.container{padding-top:10px}.body-grid{margin-top:12px}.panel{padding:18px 15px}.otp-row .btn{width:100%}.top{gap:8px}.brand{min-width:0}.brand strong{overflow-wrap:anywhere}.admin-link{flex:none}}
+@media(max-width:590px){.environment-badge{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:3}.otp-instructions{align-items:flex-start;flex-direction:column}.otp-instructions strong{width:100%}.locked-setting .hint{margin-left:0}.btn,input:not([type=checkbox]):not([type=file]),select{min-height:44px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}.phone{transform:none}}
