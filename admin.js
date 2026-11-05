@@ -10,11 +10,51 @@ function message(selector,text,ok=false){const el=$(selector);if(!el)return;el.t
 function node(tag,text,className=''){const el=document.createElement(tag);if(text!==undefined)el.textContent=String(text);if(className)el.className=className;return el;}
 async function request(path,data={}){if(!API)throw Error('ไม่ได้ตั้งค่า API');if(!state.token&&path!=='login')throw Error('กรุณาเข้าสู่ระบบ');const headers={'Content-Type':'application/json'};if(state.token)headers.Authorization='Bearer '+state.token;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),28000);try{const response=await fetch(`${API}/api/admin/${path}`,{method:'POST',headers,body:JSON.stringify(data),cache:'no-store',signal:controller.signal});let result;try{result=await response.json();}catch{throw Error('API ไม่ตอบข้อมูล JSON');}if(!response.ok||!result.ok){if(response.status===401&&path!=='login')endSession();throw Error(result.error||'เกิดข้อผิดพลาด');}return result;}catch(error){if(error.name==='AbortError')throw Error('คำขอหมดเวลา กรุณาตรวจผลล่าสุดก่อนลองอีกครั้ง');throw error;}finally{clearTimeout(timer);}}
 function dataTable(headers,rows,action){const table=node('table');table.className='data-table';const head=node('thead'),headRow=node('tr');headers.forEach(value=>headRow.append(node('th',value)));head.append(headRow);const body=node('tbody');for(const row of rows){const tr=node('tr');row.forEach(value=>tr.append(node('td',value)));if(action){const td=node('td'),button=node('button','จัดการ','btn secondary small');button.type='button';button.onclick=()=>action(row);td.append(button);tr.append(td);}body.append(tr);}table.append(head,body);return table;}
-function endSession(){state.token='';state.user=null;$('#app').hidden=true;$('#login').hidden=false;$('#user-editor').hidden=true;$('#reset-box').hidden=true;}
+const SESSION_KEY = 'nyc-admin-session:' + API;
+function saveSession(result) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      token: result.token,
+      expiresAt: result.expiresAt
+    }));
+  } catch {}
+}
+async function restoreSession() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch {}
+  if (!saved || !/^[A-Za-z0-9_-]{40,180}$/.test(saved.token) ||
+      !Number.isFinite(Date.parse(saved.expiresAt)) || Date.parse(saved.expiresAt) <= Date.now()) {
+    endSession();
+    return;
+  }
+  state.token = saved.token;
+  $('#login').hidden = true;
+  try {
+    const result = await request('dashboard');
+    if (!result.user) throw Error('ตรวจสอบบัญชีไม่ได้');
+    state.user = result.user;
+    showAdmin(result);
+  } catch (error) {
+    // A temporary outage should not discard a still-valid server session.
+    state.token = '';
+    $('#login').hidden = false;
+    message('#login-msg', error.message);
+  }
+}
+function showAdmin(dashboard) {
+  $('#login').hidden = true;
+  $('#app').hidden = false;
+  applyRole();
+  message('#login-msg', '');
+  if (dashboard) renderStats(dashboard);
+  else activateTab('overview');
+}
+function endSession(){try{sessionStorage.removeItem(SESSION_KEY);}catch{}state.token='';state.user=null;$('#app').hidden=true;$('#login').hidden=false;$('#user-editor').hidden=true;$('#reset-box').hidden=true;}
 function applyRole(){const superAdmin=state.user?.role==='SUPER_ADMIN';document.querySelectorAll('.super-only').forEach(el=>el.hidden=!superAdmin);$('#session-username').textContent=state.user?.username||'';$('#session-role').textContent=superAdmin?'Super Admin':'Admin';}
 function activateTab(name){document.querySelectorAll('[data-tab]').forEach(el=>el.classList.toggle('active',el.dataset.tab===name));document.querySelectorAll('.pane').forEach(el=>el.classList.toggle('active',el.id===`pane-${name}`));$('#admin-menu').classList.remove('mobile-open');$('#menu-toggle').setAttribute('aria-expanded','false');const loaders={overview:loadStats,users:loadUsers,options:loadOptions,accounts:loadAccounts,settings:loadSettings,export:validateExport};if(loaders[name])loaders[name]().catch(error=>alert(error.message));}
 function renderCounts(selector,values){const out=$(selector);out.replaceChildren();const items=Object.entries(values||{}).sort((a,b)=>b[1]-a[1]);if(!items.length){out.textContent='ยังไม่มีข้อมูล';return;}items.forEach(([label,value])=>{const row=node('div');row.append(node('span',label),node('strong',value));out.append(row);});}
-async function loadStats(){const result=await request('dashboard');$('#stats').replaceChildren();for(const [label,value] of [['ทะเบียนทั้งหมด',result.stats.total],['เปิดใช้งาน',result.stats.active],['นักเรียน/นักศึกษา',result.stats.student],['ครู/บุคลากร',result.stats.staff]]){const card=node('div',undefined,'stat-card');card.append(node('small',label),node('strong',value));$('#stats').append(card);}renderCounts('#types',result.stats.type);renderCounts('#degrees',result.stats.degree);$('#stats-status').textContent='โหลดข้อมูลล่าสุดแล้ว';}
+async function loadStats(){renderStats(await request('dashboard'));}
+function renderStats(result){$('#stats').replaceChildren();for(const [label,value] of [['ทะเบียนทั้งหมด',result.stats.total],['เปิดใช้งาน',result.stats.active],['นักเรียน/นักศึกษา',result.stats.student],['ครู/บุคลากร',result.stats.staff]]){const card=node('div',undefined,'stat-card');card.append(node('small',label),node('strong',value));$('#stats').append(card);}renderCounts('#types',result.stats.type);renderCounts('#degrees',result.stats.degree);$('#stats-status').textContent='โหลดข้อมูลล่าสุดแล้ว';}
 async function loadUsers(){const result=await request('users',{query:state.query,offset:state.offset});state.users=result.rows;state.headers=result.headers;state.total=result.total;const rows=result.rows.map(row=>[row[0],row[1],`${row[6]} ${row[7]}`.trim(),row[3],row[12],row[22]]);const out=$('#users-result');out.replaceChildren();out.append(dataTable(['ID','Code','ชื่อ','อีเมล','ประเภท','สถานะ',''],rows,shown=>editUser(result.rows.find(row=>row[0]===shown[0]))));$('#user-page').textContent=`${state.total?state.offset+1:0}–${Math.min(state.offset+30,state.total)} จาก ${state.total}`;}
 function renderRecordFields(container,values,editableId=false){container.replaceChildren();values.forEach((value,index)=>{const label=node('label',HEAD_CODES[index]),input=node('input');input.value=value;input.dataset.i=String(index);input.maxLength=180;if((index===0&&!editableId)||index===2)input.disabled=true;label.append(input);container.append(label);});}
 function editUser(row){if(!row)return;state.current=row.slice();$('#user-editor').hidden=false;$('#editing-id').textContent=row[0];renderRecordFields($('#editor-fields'),row);$('#user-history').replaceChildren();message('#edit-message','');$('#user-editor').scrollIntoView({behavior:'smooth',block:'start'});}
@@ -31,10 +71,10 @@ function csvCell(value){let text=String(value??'');if(/^[\s]*[=+@\-]/.test(text)
 function download(name,rows){const csv='\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n'),url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=node('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function normalizeRow(row){const out=Array.from({length:23},(_,i)=>String(row[i]??'').trim());out[2]='1';if(!out[22])out[22]='Active';if(/^\d+(\.\d+)?$/.test(out[10])){const n=Number(out[10]);if(n>20000&&n<70000)out[10]=new Date(Date.UTC(1899,11,30)+n*86400000).toISOString().slice(0,10);}return out;}
 async function validateExport(){const button=$('#export-btn');button.disabled=true;button.setAttribute('aria-busy','true');state.exportErrors=[];state.exportRows=[];state.exportHeaders=[];message('#export-msg','กำลังตรวจสอบข้อมูล...');try{let total=0,passed=0,failed=0;for(let offset=0;;offset+=100){const result=await request('export',{offset,excludedOffset:offset});state.exportHeaders=result.headers;state.exportRows.push(...result.rows);state.exportErrors.push(...(result.excluded||[]));total=result.totalRegistrations;passed=result.passedCount;failed=result.failedCount;if(!result.hasMore&&!result.excludedHasMore)break;if(offset>50000)throw Error('ข้อมูลเกิน 50,000 รายการ');}$('#export-total').textContent=total;$('#export-passed').textContent=passed;$('#export-failed').textContent=failed;$('#download-export').disabled=!state.exportRows.length;$('#export-report').disabled=!state.exportErrors.length;renderExportErrors();message('#export-msg',`ตรวจสอบแล้ว ${total} รายการ · ผ่าน ${passed} · ไม่ผ่าน ${failed}`,true);}catch(error){message('#export-msg','ตรวจสอบไม่สำเร็จ: '+error.message);}finally{button.disabled=false;button.removeAttribute('aria-busy');}}
-function renderExportErrors(){const out=$('#exclusions');out.replaceChildren();if(!state.exportErrors.length){out.append(node('p','ไม่มีรายการที่ไม่ผ่าน'));return;}const table=node('table');table.className='data-table';const head=node('tr');['ID','ประเภท','คอลัมน์/ฟิลด์','สาเหตุ',''].forEach(value=>head.append(node('th',value)));table.append(node('thead')).firstChild.append(head);const body=node('tbody');for(const item of state.exportErrors){const tr=node('tr'),fields=(item.issues||[]).map(issue=>`${issue.column} ${issue.field}`).join(', ');[item.id,item.type||'',fields,item.reason].forEach(value=>tr.append(node('td',value)));const td=node('td'),button=node('button','แก้ไขข้อมูล','btn secondary small');button.type='button';button.onclick=async()=>{state.query=item.reference;state.offset=0;$('#query').value=item.reference;activateTab('users');await loadUsers();const row=state.users.find(value=>value[0]===item.reference);if(row)editUser(row);};td.append(button);tr.append(td);body.append(tr);}table.append(body);out.append(table);}
+function renderExportErrors(){const out=$('#exclusions');out.replaceChildren();if(!state.exportErrors.length){out.append(node('p','ไม่มีรายการที่ไม่ผ่าน'));return;}const table=node('table');table.className='data-table';const head=node('tr');['ID','ประเภท','คอลัมน์/ฟิลด์','สาเหตุ',''].forEach(value=>head.append(node('th',value)));const thead=node('thead');thead.append(head);table.append(thead);const body=node('tbody');for(const item of state.exportErrors){const tr=node('tr'),fields=(item.issues||[]).map(issue=>`${issue.column} ${issue.field}`).join(', ');[item.id,item.type||'',fields,item.reason].forEach(value=>tr.append(node('td',value)));const td=node('td'),button=node('button','แก้ไขข้อมูล','btn secondary small');button.type='button';button.onclick=async()=>{state.query=item.reference;state.offset=0;$('#query').value=item.reference;activateTab('users');await loadUsers();const row=state.users.find(value=>value[0]===item.reference);if(row)editUser(row);};td.append(button);tr.append(td);body.append(tr);}table.append(body);out.append(table);}
 
 document.querySelectorAll('[data-password-target]').forEach(button=>button.onclick=()=>{const input=document.getElementById(button.dataset.passwordTarget),show=input.type==='password';input.type=show?'text':'password';button.textContent=show?'ซ่อน':'แสดง';button.setAttribute('aria-pressed',String(show));});
-$('#login-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('[type=submit]'),data=Object.fromEntries(new FormData(form));button.disabled=true;button.setAttribute('aria-busy','true');message('#login-msg','กำลังตรวจสอบ...');try{const result=await request('login',data);state.token=result.token;state.user=result.user;form.reset();$('#login').hidden=true;$('#app').hidden=false;applyRole();message('#login-msg','');activateTab('overview');}catch(error){message('#login-msg','เข้าสู่ระบบไม่สำเร็จ: '+error.message);}finally{button.disabled=false;button.removeAttribute('aria-busy');}};
+$('#login-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('[type=submit]'),data=Object.fromEntries(new FormData(form));button.disabled=true;button.setAttribute('aria-busy','true');message('#login-msg','กำลังตรวจสอบ...');try{const result=await request('login',data);state.token=result.token;state.user=result.user;saveSession(result);form.reset();showAdmin();}catch(error){message('#login-msg','เข้าสู่ระบบไม่สำเร็จ: '+error.message);}finally{button.disabled=false;button.removeAttribute('aria-busy');}};
 $('#logout').onclick=async()=>{try{await request('logout');}catch{}endSession();};
 $('#menu-toggle').onclick=()=>{const open=$('#admin-menu').classList.toggle('mobile-open');$('#menu-toggle').setAttribute('aria-expanded',String(open));};
 document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>activateTab(button.dataset.tab));
@@ -65,3 +105,5 @@ $('#export-btn').onclick=validateExport;
 $('#download-export').onclick=()=>download('NYC_Krungthai_Import_A-W_REVIEW.csv',[state.exportHeaders,...state.exportRows]);
 $('#export-report').onclick=()=>download('NYC_Export_Errors.csv',[['ID (ปกปิด)','ประเภท','คอลัมน์','ฟิลด์','สาเหตุ'],...state.exportErrors.flatMap(item=>(item.issues||[]).map(issue=>[item.id,item.type||'',issue.column,issue.field,issue.message]))]);
 const badge=$('#environment-badge');if(badge)badge.hidden=environment!=='staging';
+
+restoreSession();
