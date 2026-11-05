@@ -8,7 +8,25 @@ const GROUPS={prefix:'คำนำหน้าชื่อ',gender:'เพศ',r
 const EXPECTED=['ID','Code','Campus id','Email','Prefix(TH)','Prefix(EN)','First name(TH)','Last name(TH)','First name(EN)','Last name(EN)','Birth date','Gender','Type','Associated Student ID','Degree','Study year','Faculty id','Department id','Curriculum id','Nationality','Citizen id','Passport id','Status'];
 function message(selector,text,ok=false){const el=$(selector);if(!el)return;el.textContent=text;el.className='form-message '+(ok?'ok':'bad');}
 function node(tag,text,className=''){const el=document.createElement(tag);if(text!==undefined)el.textContent=String(text);if(className)el.className=className;return el;}
-async function request(path,data={}){if(!API)throw Error('ไม่ได้ตั้งค่า API');if(!state.token&&path!=='login')throw Error('กรุณาเข้าสู่ระบบ');const headers={'Content-Type':'application/json'};if(state.token)headers.Authorization='Bearer '+state.token;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),28000);try{const response=await fetch(`${API}/api/admin/${path}`,{method:'POST',headers,body:JSON.stringify(data),cache:'no-store',signal:controller.signal});let result;try{result=await response.json();}catch{throw Error('API ไม่ตอบข้อมูล JSON');}if(!response.ok||!result.ok){if(response.status===401&&path!=='login')endSession();throw Error(result.error||'เกิดข้อผิดพลาด');}return result;}catch(error){if(error.name==='AbortError')throw Error('คำขอหมดเวลา กรุณาตรวจผลล่าสุดก่อนลองอีกครั้ง');throw error;}finally{clearTimeout(timer);}}
+let pendingOperations = 0;
+function beginLoading() {
+  let status = document.getElementById('operation-loading');
+  if (!status) {
+    status = document.createElement('div');
+    status.id = 'operation-loading';
+    status.setAttribute('role', 'status');
+    Object.assign(status.style, {position:'fixed',bottom:'1rem',right:'1rem',zIndex:'1000',padding:'.75rem 1rem',borderRadius:'.75rem',background:'#12333b',color:'white',boxShadow:'0 4px 20px #0003'});
+    const progress = document.createElement('progress');
+    progress.setAttribute('aria-label','กำลังดำเนินการ');
+    progress.style.width = '2.5rem';
+    status.append(progress, ' กำลังดำเนินการ…');
+    document.body.append(status);
+  }
+  pendingOperations++;
+  status.hidden = false;
+  return () => { status.hidden = --pendingOperations === 0; };
+}
+async function request(path,data={}){if(!API)throw Error('ไม่ได้ตั้งค่า API');if(!state.token&&path!=='login')throw Error('กรุณาเข้าสู่ระบบ');const done=beginLoading();const headers={'Content-Type':'application/json'};if(state.token)headers.Authorization='Bearer '+state.token;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),28000);try{const response=await fetch(`${API}/api/admin/${path}`,{method:'POST',headers,body:JSON.stringify(data),cache:'no-store',signal:controller.signal});let result;try{result=await response.json();}catch{throw Error('API ไม่ตอบข้อมูล JSON');}if(!response.ok||!result.ok){if(response.status===401&&path!=='login')endSession();throw Error(result.error||'เกิดข้อผิดพลาด');}return result;}catch(error){if(error.name==='AbortError')throw Error('คำขอหมดเวลา กรุณาตรวจผลล่าสุดก่อนลองอีกครั้ง');throw error;}finally{clearTimeout(timer);done();}}
 function dataTable(headers,rows,action){const table=node('table');table.className='data-table';const head=node('thead'),headRow=node('tr');headers.forEach(value=>headRow.append(node('th',value)));head.append(headRow);const body=node('tbody');for(const row of rows){const tr=node('tr');row.forEach(value=>tr.append(node('td',value)));if(action){const td=node('td'),button=node('button','จัดการ','btn secondary small');button.type='button';button.onclick=()=>action(row);td.append(button);tr.append(td);}body.append(tr);}table.append(head,body);return table;}
 const SESSION_KEY = 'nyc-admin-session:' + API;
 function saveSession(result) {
@@ -64,7 +82,39 @@ async function loadOptions(){const result=await request('options');state.options
 function populateLevelSelect(selected=[]){const select=$('#option-levels');select.replaceChildren();state.options.filter(item=>item.category==='currentLevel'&&item.enabled).forEach(item=>{const option=new Option(item.labelTh,item.code);option.selected=selected.includes(item.code);select.add(option);});}
 function renderOptions(){const category=$('#option-category').value,items=state.options.filter(item=>item.category===category).sort((a,b)=>a.sort-b.sort),relation=['studyYear','department'].includes(category);$('#option-levels-label').hidden=!relation;populateLevelSelect();const out=$('#option-list');out.replaceChildren();const rows=items.map(item=>[item.code,item.labelTh,item.labelEn,item.enabled?'เปิด':'ปิด',item.levelCodes?.join(', ')||'ทุกระดับ',item.facultyId||'',item.departmentId||'',item.curriculumId||'']);out.append(dataTable(['รหัส','ไทย','English','สถานะ','ระดับที่สัมพันธ์','Q','R','S',''],rows,shown=>{const item=items.find(value=>value.code===shown[0]),form=$('#option-form');for(const name of ['code','labelTh','labelEn','sort','audience','facultyId','departmentId','curriculumId'])form.elements[name].value=item[name]??'';form.elements.enabled.checked=item.enabled;populateLevelSelect(item.levelCodes||[]);form.scrollIntoView({behavior:'smooth'});}));}
 async function loadSettings(){const result=await request('settings'),form=$('#settings-form');for(const [key,value] of Object.entries(result.settings||{})){const field=form.elements[key];if(!field)continue;if(field.type==='checkbox')field.checked=String(value)==='true';else field.value=value;}Array.from(form.elements).forEach(field=>{if(field.name!=='otpRequired')field.disabled=Boolean(result.readOnly);});}
-async function loadAccounts(){if(state.user?.role!=='SUPER_ADMIN')return;const result=await request('accounts');state.accounts=result.accounts;const rows=result.accounts.map(account=>[account.displayName,account.username,account.role,account.status,account.passwordChangedAt||'-']);const out=$('#account-list');out.replaceChildren();out.append(dataTable(['ชื่อ','Username','บทบาท','สถานะ','เปลี่ยนรหัสล่าสุด',''],rows,shown=>editAccount(result.accounts.find(account=>account.username===shown[1]))));}
+async function loadAccounts() {
+  if (state.user?.role !== 'SUPER_ADMIN') return;
+  state.accounts = (await request('accounts')).accounts;
+  renderAccounts();
+}
+function renderAccounts() {
+  const query = $('#account-search')?.value.trim().toLowerCase() || '';
+  const accounts = state.accounts.filter(a => [a.displayName,a.username,a.role,a.status].some(v=>String(v||'').toLowerCase().includes(query)));
+  const out = $('#account-list');
+  out.replaceChildren();
+  if (!accounts.length) { out.textContent = 'ไม่พบบัญชีผู้ดูแล'; return; }
+  const table = dataTable(['ชื่อ','Username','บทบาท','สถานะ','เปลี่ยนรหัสล่าสุด','จัดการ'], accounts.map(a=>[a.displayName,a.username,a.role,a.status,a.passwordChangedAt||'-']), row=>editAccount(accounts.find(a=>a.username===row[1])));
+  Array.from(table.tBodies[0].rows).forEach((row,i)=>{
+    const account = accounts[i];
+    if (account.status !== 'ACTIVE' || account.id === state.user?.id) return;
+    const button = node('button','ปิดใช้งาน','btn secondary');
+    button.type = 'button';
+    button.onclick = async () => {
+      if (!confirm('ปิดใช้งานบัญชี '+account.username+' หรือไม่? สามารถเปิดใช้งานอีกครั้งได้')) return;
+      button.disabled = true;
+      try {
+        await request('account-save',{id:account.id,username:account.username,displayName:account.displayName,role:account.role,status:'DISABLED'});
+        if ($('#account-form').elements.id.value===account.id) clearAccountForm();
+        await loadAccounts();
+        message('#account-msg','ปิดใช้งานบัญชีแล้ว',true);
+      } catch (error) { message('#account-msg',error.message); }
+      finally { button.disabled=false; }
+    };
+    row.lastElementChild.append(' ',button);
+  });
+  out.append(table);
+}
+$('#account-search')?.addEventListener('input',renderAccounts);
 function editAccount(account){const form=$('#account-form');form.elements.id.value=account.id;form.elements.displayName.value=account.displayName;form.elements.username.value=account.username;form.elements.role.value=account.role;form.elements.status.value=account.status;form.elements.password.value='';$('#new-account-password-label').hidden=true;$('#account-form-title').textContent='แก้ไขบัญชีผู้ดูแล';form.scrollIntoView({behavior:'smooth'});const reset=$('#reset-form');reset.elements.id.value=account.id;$('#reset-account-name').textContent=account.username;$('#reset-box').hidden=false;}
 function clearAccountForm(){const form=$('#account-form');form.reset();form.elements.id.value='';form.elements.status.value='ACTIVE';form.elements.role.value='ADMIN';$('#new-account-password-label').hidden=false;$('#account-form-title').textContent='เพิ่มบัญชีผู้ดูแล';$('#reset-box').hidden=true;message('#account-msg','');}
 function csvCell(value){let text=String(value??'');if(/^[\s]*[=+@\-]/.test(text))text="'"+text;return `"${text.replace(/"/g,'""')}"`;}
@@ -98,7 +148,7 @@ $('#clear-account-form').onclick=clearAccountForm;
 $('#reset-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,data=Object.fromEntries(new FormData(form));if(!confirm('ยืนยันรีเซ็ตรหัสผ่านและเพิกถอน Session ของบัญชีนี้?'))return;try{await request('password-reset',data);form.elements.password.value='';message('#reset-msg','รีเซ็ตรหัสผ่านและเพิกถอน Session แล้ว',true);}catch(error){message('#reset-msg',error.message);}};
 $('#password-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,data=Object.fromEntries(new FormData(form));try{const result=await request('password-change',data);if(result.reauthenticate){form.reset();endSession();message('#login-msg','เปลี่ยนรหัสผ่านแล้ว กรุณาเข้าสู่ระบบใหม่',true);}}catch(error){message('#password-msg',error.message);}};
 $('#settings-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,data=Object.fromEntries(new FormData(form));data.registrationOpen=form.elements.registrationOpen.checked;data.bankExportEnabled=form.elements.bankExportEnabled.checked;data.otpRequired=true;if(data.bankExportEnabled&&!confirm('ยืนยันเปิดการจัดเตรียมไฟล์ธนาคาร?'))return;try{await request('settings-save',data);message('#settings-msg','บันทึกการตั้งค่าแล้ว',true);}catch(error){message('#settings-msg',error.message);}};
-$('#file').onchange=async event=>{const file=event.target.files[0];state.importRows=[];state.importErrors=[];$('#import-report').hidden=true;$('#import-btn').disabled=true;if(!file)return;try{const rows=await NYCXLSX.parse(file);if(rows.length<2)throw Error('ไฟล์ไม่มีข้อมูล');if(rows[0].length!==23||rows[0].some((value,index)=>!String(value||'').toLowerCase().startsWith(EXPECTED[index].toLowerCase())))throw Error('หัวคอลัมน์ไม่ตรงแม่แบบ A–W');state.importRows=rows.slice(1).map((row,index)=>({rowNumber:index+2,row})).filter(item=>item.row.some(value=>String(value).trim())).map(item=>({rowNumber:item.rowNumber,row:normalizeRow(item.row)}));$('#import-preview').textContent=`ตรวจหัวตารางผ่าน · ${state.importRows.length} รายการ`;$('#import-btn').disabled=!state.importRows.length;}catch(error){$('#import-preview').textContent='ไม่สำเร็จ: '+error.message;}};
+$('#file').onchange=async event=>{const file=event.target.files[0];state.importRows=[];state.importErrors=[];$('#import-report').hidden=true;$('#import-btn').disabled=true;if(!file)return;const done=beginLoading();try{const rows=await NYCXLSX.parse(file);if(rows.length<2)throw Error('ไฟล์ไม่มีข้อมูล');if(rows[0].length!==23||rows[0].some((value,index)=>!String(value||'').toLowerCase().startsWith(EXPECTED[index].toLowerCase())))throw Error('หัวคอลัมน์ไม่ตรงแม่แบบ A–W');state.importRows=rows.slice(1).map((row,index)=>({rowNumber:index+2,row})).filter(item=>item.row.some(value=>String(value).trim())).map(item=>({rowNumber:item.rowNumber,row:normalizeRow(item.row)}));$('#import-preview').textContent=`ตรวจหัวตารางผ่าน · ${state.importRows.length} รายการ`;$('#import-btn').disabled=!state.importRows.length;}catch(error){$('#import-preview').textContent='ไม่สำเร็จ: '+error.message;}finally{done();}};
 $('#import-report').onclick=()=>download('NYC_Import_Errors.csv',[['แถว Excel','ID (ปกปิด)','ช่องที่ผิด','สาเหตุ'],...state.importErrors.map(item=>[item.row,item.id||'',(item.fields||[]).join(' / '),item.reason])]);
 $('#import-btn').onclick=async()=>{if(!state.importRows.length||state.importBusy||!confirm(`ยืนยันนำเข้า ${state.importRows.length} รายการ?`))return;const button=$('#import-btn');state.importBusy=true;button.disabled=true;state.importErrors=[];let added=0,rejected=0,processed=0;try{for(let i=0;i<state.importRows.length;i+=30){const batch=state.importRows.slice(i,i+30),result=await request('import',{rows:batch.map(item=>item.row),rowNumbers:batch.map(item=>item.rowNumber),startRow:i+2});added+=result.added||0;rejected+=result.rejected||0;processed+=batch.length;state.importErrors.push(...(result.errors||[]));message('#import-msg',`ตรวจ ${processed}/${state.importRows.length} · เพิ่ม ${added} · ไม่ผ่าน ${rejected}`,true);}await loadStats();}catch(error){message('#import-msg',`หยุดหลัง ${processed} รายการ: ${error.message}`);}finally{state.importBusy=false;button.disabled=false;$('#import-report').hidden=!state.importErrors.length;}};
 $('#export-btn').onclick=validateExport;
